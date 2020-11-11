@@ -1,0 +1,333 @@
+---
+title: "covid-municipios"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme: united
+runtime: shiny
+---
+
+<style type="text/css">
+.chart-title {
+   font-size: 16px;
+   font-weight: bold;
+}
+
+.value-box .caption {
+    font-size: 16px;
+}
+</style>
+
+```{r global, include=FALSE}
+library(dplyr)
+library(DT)
+library(flexdashboard)
+library(forcats)
+library(geobr)
+library(ggplot2)
+library(jsonlite)
+library(lubridate)
+library(plotly)
+library(readr)
+library(scales)
+library(sf)
+library(stringr)
+library(shiny)
+library(tidyr)
+
+source("utils.R")
+
+theme_set(theme_bw())
+
+ufs <- c("Todos", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA",
+         "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN",
+         "RO", "RR", "RS", "SC", "SE", "SP", "TO")
+
+testes_mun <- read_csv2("data/esus_testes_municipios.csv") %>%
+  filter(data_inicio_semana >= ymd("2020-03-15"),
+         data_inicio_semana <= today()) %>%
+  mutate(tipo_teste = factor(tipo_teste,
+                             levels = c("RT-PCR", "Teste rápido", "Outros")))
+
+states_shapes <- read_state(year=2018, showProgress = FALSE)
+
+min_semana_epi <- min(testes_mun$semana_epi)
+max_semana_epi <- max(testes_mun$semana_epi)
+```
+
+```{r}
+testes_uf <- reactive({
+  testes_mun %>%
+    filter(input$uf == "Todos" | uf == input$uf,
+           semana_epi >= input$semana_range[1],
+           semana_epi <= input$semana_range[2]) %>%
+    group_by(semana_epi, tipo_teste, uf) %>%
+    summarise_at(vars(starts_with("testes_")), sum, na.rm = TRUE) %>%
+    mutate(
+      testes_total = testes_positivos + testes_negativos + testes_inconclusivos,
+      testes_taxa_positivo = testes_positivos / testes_total
+    )
+})
+
+testes_agg <- reactive({
+  testes_mun %>%
+    filter(input$uf == "Todos" | uf == input$uf,
+           semana_epi >= input$semana_range[1],
+           semana_epi <= input$semana_range[2]) %>%
+    group_by(semana_epi, tipo_teste) %>%
+    summarise_at(vars(starts_with("testes_")), sum, na.rm = TRUE) %>%
+    mutate(
+      testes_total = testes_positivos + testes_negativos + testes_inconclusivos,
+      testes_taxa_positivo = testes_positivos / testes_total
+    )
+})
+```
+
+Menu {.sidebar}
+=====================================
+
+### Filtros
+
+```{r}
+selectizeInput("uf", "Estado:", choices = ufs)
+
+sliderInput("semana_range", "Semana epidemiológica:",
+            min = min_semana_epi, max = max_semana_epi,
+            value = c(min_semana_epi, max_semana_epi-1))
+```
+
+#### Dados completos
+
+```{r}
+downloadButton("downloadData", "Baixar CSV")
+
+downloadHandler(filename = function() {
+     paste0('dados-municipios-', tolower(input$uf), '.csv')
+   },
+     content = function(file) {
+       write.csv2(filter(testes_mun, input$uf == "Todos" | uf == input$uf),
+                file, row.names = FALSE)
+   }
+)
+```
+
+
+Testagem
+=====================================
+
+### Informações sobre testes da covid-19 registrados no Brasil
+
+#### Fonte dos dados: [e-SUS Notifica](https://opendatasus.saude.gov.br/dataset/casos-nacionais) / Ministério da Saúde.
+
+**Atenção** -- os dados podem estar subnotificados em algumas situações:
+
+- Alguns estados podem não notificar todos os seus casos no e-SUS Notifica.
+- O tempo entre a data de realização do teste e a data da notificação do resultado pode gerar subnotificação nas últimas semanas epidemiológicas.
+
+<hr>
+
+#### `r renderText(paste("Dados para", ifelse(input$uf == "Todos", "todo o país", input$uf), "nas semanas epidemiológicas de", input$semana_range[1], "a", input$semana_range[2]))`
+
+Row
+-----------------------------------------------------------------------
+
+### Testes PCR notificados
+
+```{r}
+renderValueBox({
+  total_testes <- testes_agg() %>%
+    filter(tipo_teste == "RT-PCR") %>%
+    pull(testes_total) %>%
+    sum() %>%
+    format(big.mark = ".", decimal.mark = ",", scientific = FALSE)
+  valueBox(
+    value = total_testes,
+    icon = "fa-vial",
+    color = "primary"
+  )
+})
+```
+
+### Percentual de testes PCR
+
+```{r}
+renderGauge({
+  taxa_pcr <- testes_agg() %>%
+    ungroup() %>%
+    summarise(taxa_pcr = round(100 * (sum(testes_total[tipo_teste == "RT-PCR"]) / sum(testes_total))))  %>%
+    pull(taxa_pcr)
+  gauge(taxa_pcr, min = 0, max = 100, symbol = '%', 
+        gaugeSectors(success = c(60, 100), warning = c(30, 59), danger = c(0, 29))
+  )
+})
+```
+
+### Taxa de PCR positivo
+
+```{r}
+renderGauge({
+  taxa_positivos <- round(100 * sum(testes_agg()$testes_positivos) / sum(testes_agg()$testes_total))
+  gauge(taxa_positivos, min = 0, max = 100, symbol = '%', 
+        gaugeSectors(success = c(0, 10), warning = c(11, 20), danger = c(21, 100))
+  )
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Taxa de testes positivos por semana epidemiológica
+
+```{r}
+renderPlotly({
+  p <- testes_agg() %>%
+    filter(tipo_teste != "Outros") %>%
+    ggplot(aes(semana_epi, testes_taxa_positivo, col = tipo_teste)) +
+      geom_line() +
+      geom_point() +
+      scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+      scale_color_brewer(palette = "Set1") +
+      labs(
+        #title = "Taxa de testes positivos por semana",
+        x = "Semana epidemiológica",
+        y = "Taxa de testes positivos",
+        col = "Tipo de teste"
+      )
+  ggplotly(p) %>%
+    layout(legend = list(x = 0, y = 1.1, orientation = "h"),
+           xaxis = list(fixedrange = TRUE),
+           yaxis = list(fixedrange = TRUE))
+})
+```
+
+<!-- Row -->
+<!-- ----------------------------------------------------------------------- -->
+
+### Taxa de testes RT-PCR positivos por estado e semana epidemiológica
+
+```{r}
+renderPlotly({
+  p <- testes_uf() %>%
+    filter(tipo_teste == "RT-PCR", !is.na(uf)) %>%
+    ungroup() %>%
+    mutate(uf = fct_reorder2(fct_rev(uf), semana_epi, testes_taxa_positivo,
+                            .desc = FALSE),
+           testes_taxa_positivo = round(testes_taxa_positivo, 2)) %>%
+    ggplot(aes(semana_epi, uf)) +
+    geom_tile(aes(fill = testes_taxa_positivo)) +
+    #scale_fill_viridis_c(option = "viridis", labels = percent) +
+    scale_fill_distiller(palette = "RdYlBu", direction = -1, labels = percent) +
+    scale_x_continuous(expand = expansion(0, 0.2)) +
+    labs(#title = "Taxa de testes RT-PCR positivos",
+         x = "Semana epidemiológica", fill = "") +
+    theme_minimal() +
+    theme(axis.title.y = element_blank(), legend.position = "top")
+  ggplotly(p) %>%
+    layout(legend = list(x = 0, y = 1.1, orientation = "h"),
+           xaxis = list(fixedrange = TRUE),
+           yaxis = list(fixedrange = TRUE))
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Taxa de testes PCR positivos por estado
+
+```{r}
+renderPlotly({
+  p <- testes_uf() %>%
+    left_join(states_shapes, by = c("uf" = "abbrev_state")) %>%
+    filter(tipo_teste == "RT-PCR", !is.na(uf),
+           between(semana_epi, input$semana_range[2]-2, input$semana_range[2])) %>%
+    ungroup() %>%
+    mutate(uf = fct_reorder2(fct_rev(uf), semana_epi, testes_taxa_positivo,
+                            .desc = FALSE),
+           taxa_positivo = round(testes_taxa_positivo, 2),
+           semana_epi_str = paste("semana", semana_epi)) %>%
+    ggplot() +
+    geom_sf(aes(fill = taxa_positivo, geometry = geom),
+            size = 0.1, col = "gray") +
+    scale_fill_distiller(
+      palette = "RdYlBu", direction = -1,
+      labels = percent, breaks = c(0.2, 0.8)) +#,
+      #limits = c(-max_abs_obitos_map_dif, max_abs_obitos_map_dif),
+      #breaks = c(-2, 0, 2)) +
+    #labs(title = "Diferença de óbitos entre uma semana e a anterior (%)",
+    #     fill = "") +
+    facet_wrap(~ semana_epi_str, nrow = 1) +
+    theme_void() +
+    theme(legend.position = "none", strip.text = element_text(size = 16),
+          legend.text = element_text(size = 12))
+  
+  ggplotly(p)
+})
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Total de testes notificados por semana epidemiológica
+
+```{r}
+renderPlotly({
+    p <- ggplot(testes_agg(), aes(semana_epi, testes_total,
+                                  col = tipo_teste)) +
+      geom_line() +
+      geom_point() +
+      scale_color_brewer(palette = "Set1") +
+      labs(#title = "Quantidade total de testes realizados por semana epidemiológica",
+           x = "Semana epidemiológica",
+           y = "Total de testes realizados",
+           col = "Tipo de teste")
+    ggplotly(p) %>%
+      layout(legend = list(x = 0, y = 1.1, orientation = "h"),
+             xaxis = list(fixedrange = TRUE),
+             yaxis = list(fixedrange = TRUE))
+  })
+```
+
+### Testes positivos notificados por semana epidemiológica
+
+```{r}
+renderPlotly({
+  p <- ggplot(testes_agg(), aes(semana_epi, testes_positivos,
+                                col = tipo_teste)) +
+    geom_line() +
+    geom_point() +
+    scale_color_brewer(palette = "Set1") +
+    labs(#title = "Quantidade de testes positivos por semana epidemiológica",
+         x = "Semana epidemiológica",
+         y = "Quantidade de testes positivos",
+         col = "Tipo de teste")
+  ggplotly(p) %>%
+    layout(legend = list(x = 0, y = 1.1, orientation = "h"),
+           xaxis = list(fixedrange = TRUE),
+           yaxis = list(fixedrange = TRUE))
+})
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Tabela com os dados de testagem agregados por tipo de teste e semana epidemiológica
+
+```{r}
+renderDataTable({
+  datatable(
+    select(testes_agg(), -testes_total, -testes_inconclusivos), filter = 'top', rownames = FALSE,
+    colnames = c('Semana epidem.', 'Tipo de teste', 'Testes negativos',
+                 'Testes positivos', 'Taxa de positivos'),
+    extensions = c('Buttons'), options = list(
+      pageLength = 10,
+      lengthMenu = list(c(10, 50, 100, -1), c('10', '50', '100', 'All')),
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel')
+    )) %>%
+    formatPercentage("testes_taxa_positivo", 1)
+  }, server = TRUE
+)
+```
