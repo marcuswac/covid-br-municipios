@@ -44,7 +44,7 @@ ufs <- c("Todos", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA",
          "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN",
          "RO", "RR", "RS", "SC", "SE", "SP", "TO")
 
-testes_mun <- read_csv2("data/esus_testes_municipios.csv") %>%
+testes_mun <- read_csv2(file.path("data", "esus_testes_municipios.csv")) %>%
   filter(data_inicio_semana >= ymd("2020-03-15"),
          data_inicio_semana <= today()) %>%
   mutate(tipo_teste = factor(tipo_teste,
