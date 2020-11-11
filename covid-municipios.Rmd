@@ -258,10 +258,17 @@ renderPlotly({
     #     fill = "") +
     facet_wrap(~ semana_epi_str, nrow = 1) +
     theme_void() +
-    theme(legend.position = "none", strip.text = element_text(size = 16),
-          legend.text = element_text(size = 12))
+    theme(legend.position = "none", strip.text = element_text(size = 12))
   
-  ggplotly(p)
+  ax <- list(
+    title = "",
+    zeroline = FALSE,
+    showline = FALSE,
+    showticklabels = FALSE,
+    showgrid = FALSE
+    )
+  ggplotly(p) %>%
+    layout(yaxis = ax)
 })
 ```
 
