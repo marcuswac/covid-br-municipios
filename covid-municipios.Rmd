@@ -46,16 +46,8 @@ ufs <- c("Todos", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA",
          "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN",
          "RO", "RR", "RS", "SC", "SE", "SP", "TO")
 
-#testes_mun <- read_csv2(file.path("data", "esus_testes_municipios.csv")) %>%
-#  filter(data_inicio_semana >= ymd("2020-03-15"),
-#         data_inicio_semana <= today()) %>%
-#  mutate(tipo_teste = factor(tipo_teste,
-#                             levels = c("RT-PCR", "Teste rápido", "Outros")))
-
 testes_estados <- read_csv2(file.path("data", "esus_testes_estados.csv"),
                             col_types = cols())
-
-#states_shapes <- read_state(year=2018, showProgress = FALSE)
 
 min_semana_epi <- min(testes_estados$semana_epi)
 max_semana_epi <- max(testes_estados$semana_epi)
@@ -63,39 +55,8 @@ max_semana_epi <- max(testes_estados$semana_epi)
 change_levels <- c("redução forte (< -50%)", "redução (< -15%)", "estável", "aumento (> +15%)",
                    "aumento forte (> +50%)")
 
-lim_x <- c(0, 6)
-lim_y <- c(-1, 1)
-
-n_frames <- 20
-
 #states_shapes <- read_state(year=2018, showProgress = FALSE)
 states_shapes <- st_read(file.path("data", "states_shapes.gpkg"))
-
-#evolucao <- read_csv2(file.path("data", "covid_evolucao_estados.csv"))
-
-# populacao_estados <- read_csv(file.path("data", "cities_info.csv")) %>%
-#   group_by(region, state) %>%
-#   summarise(populacao = sum(pop2019, na.rm = TRUE))
-
-# evolucao <- "https://github.com/wcota/covid19br/raw/master/cases-brazil-states.csv" %>%
-#   read_csv() %>%
-#   filter(state != "TOTAL") %>%
-#   group_by(state, epi_week) %>%
-#   summarise(
-#     casos = sum(newCases, na.rm = TRUE),
-#     obitos = sum(newDeaths, na.rm = TRUE),
-#     casos_acumulado = max(totalCases, na.rm = TRUE),
-#     obitos_acumulado = max(deaths, na.rm = TRUE)) %>%
-#   left_join(populacao_estados, by = c("state")) %>%
-#   mutate(
-#     incidencia = 10^5 * casos / populacao,
-#     incidencia_acumulado = 10^5 * max(casos_acumulado) / populacao,
-#     incidencia_variacao = (incidencia - lag(incidencia)) / lag(incidencia),
-#     mortalidade = 10^5 * obitos / populacao,
-#     mortalidade_acumulado = 10^5 * max(obitos_acumulado) / populacao,
-#     mortalidade_variacao = (mortalidade - lag(mortalidade)) / lag(mortalidade)
-#   ) %>%
-#   rename(regiao = region, uf = state, semana_epi = epi_week)
 ```
 
 Menu {.sidebar}
@@ -120,13 +81,13 @@ downloadHandler(filename = function() {
      paste0('dados-municipios-', tolower(input$uf), '.csv')
    },
      content = function(file) {
-       # testes_mun <- read_csv2(file.path("data", "esus_testes_municipios.csv")) %>%
-       # filter(input$uf == "Todos" | uf == input$uf,
-       #        data_inicio_semana >= ymd("2020-03-15"),
-       #        data_inicio_semana <= today()) %>%
-       # mutate(tipo_teste = factor(tipo_teste,
-       #                         levels = c("RT-PCR", "Teste rápido", "Outros")))
-       # write.csv2(testes_mun, file, row.names = FALSE)
+       testes_mun <- read_csv2(file.path("data", "esus_testes_municipios.csv")) %>%
+       filter(input$uf == "Todos" | uf == input$uf,
+              data_inicio_semana >= ymd("2020-03-15"),
+              data_inicio_semana <= today()) %>%
+       mutate(tipo_teste = factor(tipo_teste,
+                               levels = c("RT-PCR", "Teste rápido", "Outros")))
+       write.csv2(testes_mun, file, row.names = FALSE)
    }
 )
 ```
@@ -141,13 +102,7 @@ testes_uf <- reactive({
   testes_estados %>%
     filter(input$uf == "Todos" | uf == input$uf,
            semana_epi >= input$semana_range[1],
-           semana_epi <= input$semana_range[2])# %>%
-    # group_by(semana_epi, tipo_teste, uf) %>%
-    # summarise_at(vars(starts_with("testes_")), sum, na.rm = TRUE) %>%
-    # mutate(
-    #   testes_total = testes_positivos + testes_negativos + testes_inconclusivos,
-    #   testes_taxa_positivo = testes_positivos / testes_total
-    # )
+           semana_epi <= input$semana_range[2])
 })
 
 testes_agg <- reactive({
@@ -262,64 +217,18 @@ renderPlotly({
            testes_taxa_positivo = round(testes_taxa_positivo, 2)) %>%
     ggplot(aes(semana_epi, uf)) +
     geom_tile(aes(fill = testes_taxa_positivo)) +
-    #scale_fill_viridis_c(option = "viridis", labels = percent) +
     scale_fill_distiller(palette = "RdYlBu", direction = -1, labels = percent,
                          limits = c(0, 1)) +
     scale_x_continuous(expand = expansion(0, 0.2)) +
-    labs(#title = "Taxa de testes RT-PCR positivos",
-         x = "Semana epidemiológica", fill = "") +
+    labs(x = "Semana epidemiológica", fill = "") +
     theme_minimal() +
     theme(axis.title.y = element_blank(), legend.position = "top")
   ggplotly(p) %>%
     layout(legend = list(x = 0, y = 1.1, orientation = "h"),
-           xaxis = list(fixedrange = TRUE)#,
-           #yaxis = list(fixedrange = TRUE)
+           xaxis = list(fixedrange = TRUE)
     )
 })
 ```
-
-<!-- Row -->
-<!-- ----------------------------------------------------------------------- -->
-
-<!-- ### Taxa de testes PCR positivos por estado -->
-
-<!-- ```{r} -->
-<!-- renderPlotly({ -->
-<!--   p <- testes_uf() %>% -->
-<!--     left_join(filter(states_shapes, input$uf == "Todos" | input$uf == abbrev_state), -->
-<!--               by = c("uf" = "abbrev_state")) %>% -->
-<!--     filter(tipo_teste == "RT-PCR", !is.na(uf), -->
-<!--            between(semana_epi, input$semana_range[2]-1, input$semana_range[2])) %>% -->
-<!--     ungroup() %>% -->
-<!--     mutate(uf = fct_reorder2(fct_rev(uf), semana_epi, testes_taxa_positivo, -->
-<!--                             .desc = FALSE), -->
-<!--            taxa_positivo = round(testes_taxa_positivo, 2), -->
-<!--            semana_epi_str = paste("semana", semana_epi)) %>% -->
-<!--     ggplot() + -->
-<!--     geom_sf(aes(fill = taxa_positivo, geometry = geom), -->
-<!--             size = 0.1, col = "white") + -->
-<!--     scale_fill_distiller( -->
-<!--       palette = "RdYlBu", direction = -1, -->
-<!--       labels = percent, limits = c(0, 1)) +# , breaks = c(0.2, 0.8)) +, -->
-<!--     facet_wrap(~ semana_epi_str, nrow = 1) + -->
-<!--     labs(fill = "") + -->
-<!--     theme_void() + -->
-<!--     theme( -->
-<!--       #legend.position = "none", -->
-<!--       strip.text = element_text(size = 12)) -->
-
-<!--   ax <- list( -->
-<!--     title = "", -->
-<!--     zeroline = FALSE, -->
-<!--     showline = FALSE, -->
-<!--     showticklabels = FALSE, -->
-<!--     showgrid = FALSE -->
-<!--     ) -->
-<!--   ggplotly(p) %>% -->
-<!--     layout(yaxis = ax) -->
-<!-- }) -->
-<!-- ``` -->
-
 
 Row
 -----------------------------------------------------------------------
@@ -373,7 +282,7 @@ Row
 
 - Alguns estados não notificam todos os seus casos suspeitos no e-SUS Notifica.
 -	Existe um atraso entre a notificação do resultado do exame e a disponibilização desta informação, o que pode subdimensionar temporariamente os dados das duas últimas semanas epidemiológicas visualizadas.
--	O total de testes indica a disponibilidade de testes para a população. Já o percentual de testes positivos é um dos indicadores relacionados ao nível de controle da epidemia (Segundo a OMS o percentual de testes RT-PCR positivos deve ser inferior a 5%)
+O total de testes indica a disponibilidade de testes para a população. Por sua vez, o alto percentual de testes positivos pode indicar baixa disponibilidade de testes ou epidemia fora de controle (Segundo a OMS o percentual de testes RT-PCR positivos deve ser inferior a 5%).
 -	Os testes do tipo RT-PCR são mais confiáveis e detectam a infecção precocemente. Por isso, são os mais utilizados e recomendados internacionalmente para diagnóstico de casos e rastreio populacional.
 -	Os dados disponibilizados aqui se referem aos testes realizados nos pacientes que foram notificados como casos suspeitos para COVID-19. Desta forma, podem não representar o total de testes realizados no Brasil (a COVID-19 é uma doença de notificação obrigatória, entretanto, nem todos os casos suspeitos são notificados).
 
@@ -403,6 +312,12 @@ Row
 Mortalidade
 ========================================================================
 
+### Análise sobre a mortalidade da COVID-19
+
+Calculada como a quantidade de óbitos notificados por semana epidemiológica para cada 100 mil habitantes. Fonte dos dados: [Brasil.io](https://brasil.io/dataset/covid19/caso/)
+
+<hr>
+
 ```{r}
 evolucao_filt <- reactive({
   print("Carregando evolução filt")
@@ -430,6 +345,10 @@ Row
 
 ```{r}
 renderPlotly({
+  lim_x <- c(0, 6)
+  lim_y <- c(-1, 1)
+
+  n_frames <- 20
   df <- evolucao_filt() %>%
     mutate(
       mortalidade_lim = ifelse(mortalidade < lim_x[1], lim_x[1],
@@ -468,7 +387,7 @@ renderPlotly({
 ```
 
 
-### Mortalidade relativa ao pico de cada estado
+### Mortalidade relativa à semana de pico de cada estado
 
 ```{r}
 renderPlotly({
@@ -483,7 +402,7 @@ renderPlotly({
       fill = mortalidade_relativa,
       text = paste0(uf, ": ", round(mortalidade, 2), " (",
                     round(mortalidade_relativa*100, 1), "% do pico)"))) +
-    scale_fill_distiller(palette = "RdYlBu", direction = -1) +
+    scale_fill_distiller(palette = "RdYlBu", direction = -1, labels = percent) +
     scale_x_continuous(expand = expansion(0, 0.2)) +
     labs(#title = "Taxa de testes RT-PCR positivos",
          x = "Semana epidemiológica", fill = "") +
@@ -550,7 +469,7 @@ Row
 renderPlotly({
   p <- evolucao_filt() %>%
     filter(between(semana_epi, input$semana_range[2]-1, input$semana_range[2])) %>%
-    left_join(filter(states_shapes, input$uf == "Todos" | input$uf == abbrev_state),
+    left_join(states_shapes,#filter(states_shapes, input$uf == "Todos" | input$uf == abbrev_state),
               by = c("uf" = "abbrev_state")) %>%
     ggplot(aes(fill = mortalidade, geometry = geom,
                text = paste0(uf, ": ", round(mortalidade, 2)))) +
@@ -621,3 +540,142 @@ renderPlotly({
 <!-- }) -->
 <!-- ``` -->
 
+
+Incidência
+========================================================================
+
+### Análise sobre a incidência da COVID-19
+
+Calculada como a quantidade de casos notificados por semana epidemiológica para cada 100 mil habitantes. Fonte dos dados: [Brasil.io](https://brasil.io/dataset/covid19/caso/)
+
+<hr>
+
+```{r}
+evolucao_filt <- reactive({
+  print("Carregando evolução filt")
+  read_csv2(file.path("data", "covid_evolucao_estados.csv"), col_types = cols()) %>%
+    filter(#semana_epi >= input$semana_range[2] - n_frames,
+           semana_epi >= input$semana_range[1],
+           semana_epi <= input$semana_range[2]) %>%
+    mutate(
+      semana_epi_str = paste("semana", semana_epi),
+      incidencia_variacao_fct = factor(case_when(
+        incidencia_variacao >= 0.5 ~ change_levels[5],
+        incidencia_variacao >= 0.15 ~ change_levels[4],
+        incidencia_variacao <= -0.5 ~ change_levels[1],
+        incidencia_variacao <= -0.15 ~ change_levels[2],
+        TRUE ~ change_levels[3]), levels = change_levels)
+    )
+})
+```
+
+
+Row
+------------------------------------------------------------------------
+
+### Incidência e a sua variação semanal por estado
+
+```{r}
+renderPlotly({
+  lim_x <- c(-Inf, 750)
+  lim_y <- c(-Inf, 3)
+  df <- evolucao_filt() %>%
+    mutate(
+      incidencia_lim = ifelse(incidencia < lim_x[1], lim_x[1],
+                           ifelse(incidencia > lim_x[2], lim_x[2],
+                                  incidencia)),
+      incidencia_variacao_lim = ifelse(incidencia_variacao < lim_y[1], lim_y[1],
+                                   ifelse(incidencia_variacao > lim_y[2], lim_y[2],
+                                          incidencia_variacao))
+    )
+  p <- df %>%
+    ggplot(aes(incidencia_lim, incidencia_variacao_lim, frame = semana_epi, col = regiao,
+               text = paste0(uf, ": ", round(incidencia, 2), " (",
+                             ifelse(incidencia_variacao >= 0, "+", ""),
+                             round(incidencia_variacao*100, 1), "%)"))) +
+    geom_hline(aes(yintercept = 0), lty = 2, col = "grey") +
+    geom_point(size = 5, alpha = 0.3) +
+    geom_text(aes(label = uf), size = 3, col = "black", show.legend = FALSE,
+              vjust = "center", hjust = "center") +
+    scale_x_continuous(expand = c(0.02, 0)) +
+    scale_y_continuous(labels = percent, expand = c(0, 0.1)) +
+    #coord_trans(xlim = lim_x, ylim = lim_y) +
+    labs(x = "Incidencia",
+         y = "Variação semanal da incidencia",
+         col = "região") +
+    theme(legend.position = "top")
+  
+  ggplotly(p, tooltip = "text") %>%
+    layout(legend = list(x = 0, y = 1.15, orientation = "h")) %>%
+    animation_opts(1000, redraw = FALSE) %>%
+    animation_slider(
+      #active = n_frames,
+      currentvalue = list(prefix = "Semana: ",
+                          font = list(color = "red"))
+    )
+})
+```
+
+
+### Incidência relativa à semana de pico de cada estado
+
+```{r}
+renderPlotly({
+  p <- evolucao_filt() %>%
+    group_by(uf) %>%
+    mutate(incidencia_relativa = incidencia / max(incidencia)) %>%
+    ungroup() %>%
+    mutate(uf = fct_reorder2(uf, semana_epi, incidencia_relativa,
+                             .desc = FALSE)) %>%
+    ggplot(aes(semana_epi, uf)) +
+    geom_tile(aes(
+      fill = incidencia_relativa,
+      text = paste0(uf, ": ", round(incidencia, 2), " (",
+                    round(incidencia_relativa*100, 1), "% do pico)"))) +
+    scale_fill_distiller(palette = "RdYlBu", direction = -1, labels = percent) +
+    scale_x_continuous(expand = expansion(0, 0.2)) +
+    labs(x = "Semana epidemiológica", fill = "") +
+    theme_minimal() +
+    theme(axis.title.y = element_blank(), legend.position = "top")
+  ggplotly(p, tooltip = "text") %>%
+    layout(legend = list(x = 0, y = 1.1, orientation = "h"),
+           xaxis = list(fixedrange = TRUE)
+    )
+})
+```
+
+
+Row
+------------------------------------------------------------------------
+
+### Mapa da incidência semanal por estado
+
+```{r}
+renderPlotly({
+  p <- evolucao_filt() %>%
+    filter(between(semana_epi, input$semana_range[2]-1, input$semana_range[2])) %>%
+    left_join(states_shapes,
+              by = c("uf" = "abbrev_state")) %>%
+    ungroup() %>%
+    ggplot(aes(fill = incidencia, geometry = geom,
+               text = paste0(uf, ": ", round(incidencia, 2)))) +
+    geom_sf(size = 0.07, col = "black") +
+    facet_wrap(~ semana_epi_str, nrow = 1) +
+    scale_fill_distiller(palette = "RdYlBu", direction = -1) +
+    labs(fill = "") +
+    theme_void() +
+    theme(strip.text = element_text(size = 12))
+  
+  ax <- list(
+    title = "",
+    zeroline = FALSE,
+    showline = FALSE,
+    showticklabels = FALSE,
+    showgrid = FALSE
+    )
+  
+  ggplotly(p, tooltip = "text") %>%
+    layout(yaxis = ax) %>%
+    style(hoveron = "fill")
+})
+```
