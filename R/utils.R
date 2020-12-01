@@ -24,21 +24,28 @@ load_municipios_info <- function() {
   )
 }
 
-load_testes_municipios <- function(input_file, min_date = "2020-03-15") {
+load_testes_municipios <- function(input_file, min_date = "2020-03-01") {
   read_csv2(input_file) %>%
-    filter(data_inicio_semana >= ymd(min_date),
-           data_inicio_semana <= today()) %>%
+    filter(ultimo_dia_semana - days(7) >= ymd(min_date),
+           ultimo_dia_semana <= today()) %>%
     mutate(tipo_teste = factor(tipo_teste,
                                levels = c("RT-PCR", "Teste rápido", "Outros")))
 }
 
 aggregate_testes_estados <- function(testes_municipios) {
   testes_municipios %>%
+    group_by(semana_epi) %>%
+    mutate(ultimo_dia_semana = max(ultimo_dia_semana)) %>%
+    filter(wday(ultimo_dia_semana) == 7) %>%
     group_by(semana_epi, tipo_teste, uf) %>%
-    summarise_at(vars(starts_with("testes_")), sum, na.rm = TRUE) %>%
-    mutate(
-      testes_total = testes_positivos + testes_negativos + testes_inconclusivos,
-      testes_taxa_positivo = testes_positivos / testes_total
+    summarise(
+      ultimo_dia_semana = max(ultimo_dia_semana),
+      testes_positivos = sum(testes_positivos, na.rm = TRUE),
+      testes_negativos = sum(testes_negativos, na.rm = TRUE),
+      testes_inconclusivos = sum(testes_inconclusivos, na.rm = TRUE),
+      testes_total = sum(testes_total, na.rm = TRUE),
+      testes_com_resultado = testes_positivos + testes_negativos + testes_inconclusivos,
+      testes_taxa_positivo = testes_positivos / testes_com_resultado
     )
 }
 
@@ -68,12 +75,12 @@ aggregate_tests_by_result <- function(esus_paths) {
              semana_epi = epiweek(dataNotificacao)) %>%
       filter(dataNotificacao >= ymd("2020-03-01"), dataNotificacao <= today()) %>%
       group_by(semana_epi) %>%
-      mutate(data_inicio_semana = min(dataNotificacao)) %>%
+      mutate(ultimo_dia_semana = max(dataNotificacao)) %>%
       group_by(semana_epi, municipio_ibge = municipioIBGE,
                tipo_teste = tipoTeste) %>%
       summarise(
-        data_inicio_semana = first(data_inicio_semana),
-        total_notificacoes = n(),
+        ultimo_dia_semana = max(ultimo_dia_semana),
+        testes_total = n(),
         testes_negativos = sum(resultadoTeste == "Negativo", na.rm = TRUE),
         testes_positivos = sum(resultadoTeste == "Positivo", na.rm = TRUE),
         testes_inconclusivos = sum(resultadoTeste == "Inconclusivo ou Indeterminado", na.rm = TRUE)
