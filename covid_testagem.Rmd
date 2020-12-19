@@ -9,9 +9,6 @@ runtime: shiny
 resource_files:
 - data/cities_info.csv
 - data/esus_testes_estados.csv
-- data/states_shapes.gpkg
-- data/states_shapes.gpkg
-- data/states_shapes.gpkg
 ---
 
 <style type="text/css">
@@ -50,12 +47,6 @@ testes_estados <- read_csv2(file.path("data", "esus_testes_estados.csv"),
 
 min_semana_epi <- min(testes_estados$semana_epi)
 max_semana_epi <- max(testes_estados$semana_epi)
-
-change_levels <- c("redução forte (< -50%)", "redução (< -15%)", "estável", "aumento (> +15%)",
-                   "aumento forte (> +50%)")
-
-#states_shapes <- read_state(year=2018, showProgress = FALSE)
-states_shapes <- st_read(file.path("data", "states_shapes.gpkg"))
 ```
 
 ```{r}
@@ -74,10 +65,33 @@ testes_agg <- reactive({
            semana_epi >= input$semana_range[1],
            semana_epi <= input$semana_range[2]) %>%
     group_by(semana_epi, tipo_teste) %>%
-    summarise_at(vars(starts_with("testes_")), sum, na.rm = TRUE) %>%
+    summarise_at(vars(starts_with("testes_"), casos_confirmados), sum, na.rm = TRUE) %>%
     mutate(
-      #testes_total = testes_total,
-      #testes_com_resultado = testes_positivos + testes_negativos + testes_inconclusivos,
+      testes_taxa_positivo = testes_positivos / testes_com_resultado
+    )
+})
+
+testes_agg_tipo <- reactive({
+  testes_agg() %>%
+    group_by(tipo_teste) %>%
+    summarise(
+      testes_total = sum(testes_total),
+      testes_positivos = sum(testes_positivos),
+      testes_com_resultado = sum(testes_com_resultado),
+      testes_pendentes_frac = (testes_total - testes_com_resultado) / testes_total,
+      casos_confirmados = sum(casos_confirmados, na.rm = TRUE)
+    )
+})
+
+testes_agg_pcr <- reactive({
+  testes_pcr <- testes_agg() %>%
+    filter(tipo_teste == "RT-PCR") %>%
+    ungroup() %>%
+    summarise(
+      testes_total = sum(testes_total),
+      testes_positivos = sum(testes_positivos),
+      testes_com_resultado = sum(testes_com_resultado),
+      testes_pendentes_frac = (testes_total - testes_com_resultado) / sum(testes_total),
       testes_taxa_positivo = testes_positivos / testes_com_resultado
     )
 })
@@ -90,94 +104,98 @@ Menu {.sidebar data-width=200}
 ### Filtros
 
 ```{r}
-  selectizeInput("uf", "Estado:", choices = ufs, width = "90%")
+selectizeInput("uf", "Estado:", choices = ufs, width = "90%")
 
-  sliderInput("semana_range", "Semanas epidemiológicas:",
-            min = min_semana_epi, max = max_semana_epi,
-            value = c(min_semana_epi, max_semana_epi))
+sliderInput("semana_range", "Semanas epidemiológicas:",
+          min = min_semana_epi, max = max_semana_epi,
+          value = c(min_semana_epi, max_semana_epi))
 ```
 
 
+Row {data-height}
+-----------------------------------------------------------------------
+
+### Testes para diagnóstico laboratorial dos casos suspeitos de Covid-19
+
+<!-- Os dados apresentados são referentes aos estados e ao período de análise filtrados. -->
+
+<h4>
+```{r}
+renderUI({
+  uf_str <- ifelse(input$uf == "Todos", "No Brasil", paste("No estado", input$uf))
+  notificacoes_total <- format(sum(testes_agg_tipo()$testes_total, na.rm = TRUE),
+                               big.mark = ".", decimal.mark = ",", scientific = FALSE)
+  testes_pcr_total <- testes_agg_pcr()$testes_total %>%
+    format(big.mark = ".", decimal.mark = ",", scientific = FALSE)
+  testes_pcr_pendentes <- percent(testes_agg_pcr()$testes_pendentes_frac, accuracy = 1)
+  testes_pcr_positivos <- percent(testes_agg_pcr()$testes_taxa_positivo,accuracy = 1)
+  
+  testes_pcr_prop <- testes_agg_tipo() %>%
+    filter(!is.na(tipo_teste)) %>%
+    mutate(testes_frac = testes_total / sum(testes_total)) %>%
+    filter(tipo_teste == "RT-PCR") %>%
+    pull(testes_frac) %>%
+    percent(accuracy = 1)
+
+  div(
+    strong(span(class="text-primary", uf_str, .noWS = "after"), .noWS = "after"),
+    ", nas semanas epidemiológicas de",
+    strong(span(class="text-primary", input$semana_range[1])), "a",
+    strong(span(class="text-primary", input$semana_range[2], .noWS = "after"), .noWS = "after"),
+    ", foram notificados",
+    strong(span(class="text-primary", notificacoes_total)), "casos de pacientes suspeitos",
+    "para COVID-19 no e-SUS Notifica. Destas notificações,",
+    strong(span(class="text-primary", testes_pcr_prop)), "foram de testes do tipo RT-PCR, sendo que",
+    strong(span(class="text-primary", testes_pcr_pendentes)), "dos resultados RT-PCR ainda não foram divulgados.",
+    "A taxa de testes RT-PCR positivos para os resultados divulgados foi de",
+    strong(span(class="text-primary", testes_pcr_positivos, .noWS = "after"), .noWS = "after"), "."
+  )
+})
+```
+</h4>
+
+Fonte dos dados: e-SUS Notifica / Ministério da Saúde.
+
 Row
 -----------------------------------------------------------------------
 
-### Análise de testes RT-PCR notificados para COVID-19
 
-Fonte dos dados: [e-SUS Notifica](https://opendatasus.saude.gov.br/dataset/casos-nacionais) / Ministério da Saúde.
-
-Os dados apresentados são referentes aos estados e ao período de análise filtrados.
-
-
-Row
------------------------------------------------------------------------
-
-### Testes PCR realizados
+### Notificações realizadas
 
 ```{r}
 renderValueBox({
-  testes_pcr <- testes_agg() %>%
-    filter(tipo_teste == "RT-PCR") %>%
-    ungroup() %>%
-    summarise(
-      testes_total = sum(testes_total),
-      testes_com_resultado = sum(testes_com_resultado),
-      testes_pendentes_pct = round(100 * (testes_total - testes_com_resultado) / testes_total)
-    )
-  
+  notificacoes_total <- sum(testes_agg_tipo()$testes_total, na.rm = TRUE)
   valueBox(
-    value = format(testes_pcr$testes_total, big.mark = ".", decimal.mark = ",", scientific = FALSE),
-    icon = "fa-vial",
-    color = "primary"
+    value = format(notificacoes_total, big.mark = ".",
+                   decimal.mark = ",", scientific = FALSE),
+    icon = "fa-notes-medical",
+    color = "danger"
   )
 })
 ```
 
-### Testes PCR com resultado pendente
+### Testes notificados
 
 ```{r}
 renderValueBox({
-  testes_pcr <- testes_agg() %>%
-    filter(tipo_teste == "RT-PCR") %>%
-    ungroup() %>%
-    summarise(
-      testes_total = sum(testes_total),
-      testes_com_resultado = sum(testes_com_resultado),
-      testes_pendentes_frac = (testes_total - testes_com_resultado) / testes_total
-    )
-  
+  testes_total <- with(filter(testes_agg_tipo(), !is.na(tipo_teste)), sum(testes_total, na.rm = TRUE))
   valueBox(
-    value = percent(testes_pcr$testes_pendentes_frac, accuracy = 1),
-    icon = "glyphicon-time",
+    value = format(testes_total, big.mark = ".", decimal.mark = ",", scientific = FALSE),
+    icon = "fa-vial",
     color = "warning"
   )
 })
 ```
 
-
-### Testes do tipo PCR em relação ao total
-
-```{r}
-renderGauge({
-  taxa_pcr <- testes_agg() %>%
-    ungroup() %>%
-    summarise(
-      taxa_pcr = round(
-        100 * (sum(testes_com_resultado[tipo_teste == "RT-PCR"]) / sum(testes_com_resultado)))
-     ) %>%
-    pull(taxa_pcr)
-  gauge(taxa_pcr, min = 0, max = 100, symbol = '%', 
-        gaugeSectors(success = c(60, 100), warning = c(30, 59), danger = c(0, 29))
-  )
-})
-```
-
-### Percentual de testes PCR positivos
+### Casos confirmados
 
 ```{r}
-renderGauge({
-  taxa_positivos <- round(100 * sum(testes_agg()$testes_positivos) / sum(testes_agg()$testes_com_resultado))
-  gauge(taxa_positivos, min = 0, max = 100, symbol = '%', 
-        gaugeSectors(success = c(0, 10), warning = c(11, 20), danger = c(21, 100))
+renderValueBox({
+  casos_confirmados_total <- sum(testes_agg_tipo()$casos_confirmados, na.rm = TRUE)
+  valueBox(
+    value = format(casos_confirmados_total, big.mark = ".", decimal.mark = ",", scientific = FALSE),
+    icon = "fa-plus",
+    color = "primary"
   )
 })
 ```
@@ -185,7 +203,114 @@ renderGauge({
 Row
 -----------------------------------------------------------------------
 
-### Percentual de testes positivos por semana epidemiológica
+### Testes do tipo RT-PCR
+
+```{r}
+renderGauge({
+  taxa_pcr <- testes_agg_tipo() %>%
+    filter(!is.na(tipo_teste)) %>%
+    mutate(testes_frac = testes_total / sum(testes_total)) %>%
+    filter(tipo_teste == "RT-PCR") %>%
+    pull(testes_frac)
+  gauge(round(100 * taxa_pcr), min = 0, max = 100, symbol = '%',
+        gaugeSectors(success = c(60, 100), warning = c(30, 59), danger = c(0, 29))
+  )
+})
+```
+
+### Testes RT-PCR com resultado pendente
+
+```{r}
+renderGauge({
+  pcr_pendente <- testes_agg_pcr()$testes_pendentes_frac
+  gauge(round(100 * pcr_pendente), min = 0, max = 100, symbol = '%',
+        gaugeSectors(success = c(60, 100), warning = c(30, 59), danger = c(0, 29))
+  )
+})
+```
+
+
+### Testes RT-PCR positivos
+
+```{r}
+renderGauge({
+  #taxa_positivos <- round(100 * testes_agg_pcr()$testes_positivos / testes_agg_pcr()$testes_com_resultado)
+  taxa_positivos <- round(100 * testes_agg_pcr()$testes_taxa_positivo)
+  gauge(taxa_positivos, min = 0, max = 100, symbol = '%',
+        gaugeSectors(success = c(0, 10), warning = c(11, 20), danger = c(21, 100))
+  )
+})
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+
+### Notificações semanais por tipo de teste
+
+```{r}
+renderPlotly({
+    p <- testes_agg() %>%
+      #filter(!is.na(tipo_teste)) %>%
+      mutate(tipo_teste = factor(ifelse(is.na(tipo_teste), "Indefinido", tipo_teste),
+                                 levels = c("Indefinido", "Teste rápido", "RT-PCR"))) %>%
+      ggplot(aes(semana_epi, testes_total, fill = tipo_teste)) +
+      #geom_line() +
+      #geom_point() +
+      geom_col() +
+      #scale_color_brewer(palette = "Set2") +
+      scale_fill_brewer(palette = "Set2") +
+      scale_y_continuous(labels = number) +
+      labs(x = "Semana epidemiológica",
+           y = NULL,
+           col = "Tipo de teste")
+    ggplotly(p) %>%
+      layout(legend = list(x = 0, y = 1.1, orientation = "h")#,
+             #xaxis = list(fixedrange = TRUE)
+      )
+  })
+```
+
+### Total semanal de testes PCR notificados por resultado
+
+```{r}
+renderPlotly({
+  resultados <- c("positivo", "negativo", "inconclusivo", "pendente")
+  df <- testes_agg() %>%
+    filter(tipo_teste == "RT-PCR")
+  
+  df <- tibble(semana_epi = df$semana_epi, resultado = resultados[1],
+               quantidade = df$testes_positivos) %>%
+    bind_rows(tibble(semana_epi = df$semana_epi, resultado = resultados[2],
+                     quantidade = df$testes_negativos)) %>%
+    bind_rows(tibble(semana_epi = df$semana_epi, resultado = resultados[3],
+                     quantidade = df$testes_inconclusivos)) %>%
+    bind_rows(tibble(semana_epi = df$semana_epi, resultado = resultados[4],
+                     quantidade = df$testes_total - df$testes_com_resultado)) %>%
+    mutate(resultado = factor(resultado, levels = rev(resultados)))
+    
+  p <- df %>%
+    ggplot(aes(semana_epi, quantidade, fill = resultado)) +
+      geom_col() +
+      scale_y_continuous(labels = number) +
+      scale_fill_manual(values = brewer_pal(palette = "Set1")(4)[4:1]) +
+      labs(
+        x = "Semana epidemiológica",
+        y = NULL,
+        fill = ""
+      )
+  ggplotly(p) %>%
+    layout(legend = list(x = -0.1, y = 1.1, orientation = "h")#,
+           #xaxis = list(fixedrange = TRUE)
+    )
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Percentual de testes positivos por tipo de teste
 
 ```{r}
 renderPlotly({
@@ -195,10 +320,11 @@ renderPlotly({
       geom_line() +
       geom_point() +
       scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-      scale_color_brewer(palette = "Set1") +
+      #scale_color_brewer(palette = "Set2") +
+      scale_color_manual(values = brewer_pal(palette = "Set2")(3)[2:3]) +
       labs(
         x = "Semana epidemiológica",
-        y = "Taxa de testes positivos",
+        y = NULL,
         col = "Tipo de teste"
       )
   ggplotly(p) %>%
@@ -211,7 +337,7 @@ renderPlotly({
 <!-- Row -->
 <!-- ----------------------------------------------------------------------- -->
 
-### Percentual de testes RT-PCR positivos por estado e semana epidemiológica
+### Percentual de testes RT-PCR positivos por estado
 
 ```{r}
 renderPlotly({
@@ -236,56 +362,31 @@ renderPlotly({
 })
 ```
 
-Row
------------------------------------------------------------------------
-
-### Testes realizados por semana epidemiológica
-
-```{r}
-renderPlotly({
-    p <- ggplot(testes_agg(), aes(semana_epi, testes_com_resultado,
-                                  col = tipo_teste)) +
-      geom_line() +
-      geom_point() +
-      scale_color_brewer(palette = "Set1") +
-      labs(x = "Semana epidemiológica",
-           y = "Total de testes realizados",
-           col = "Tipo de teste")
-    ggplotly(p) %>%
-      layout(legend = list(x = 0, y = 1.1, orientation = "h"),
-             xaxis = list(fixedrange = TRUE)
-      )
-  })
-```
-
-### Testes positivos por semana epidemiológica
-
-```{r}
-renderPlotly({
-  p <- ggplot(testes_agg(), aes(semana_epi, testes_positivos,
-                                col = tipo_teste)) +
-    geom_line() +
-    geom_point() +
-    scale_color_brewer(palette = "Set1") +
-    labs(x = "Semana epidemiológica",
-         y = "Quantidade de testes positivos",
-         col = "Tipo de teste")
-  ggplotly(p) %>%
-    layout(legend = list(x = 0, y = 1.1, orientation = "h"),
-           xaxis = list(fixedrange = TRUE)#,
-           #yaxis = list(fixedrange = TRUE)
-      )
-})
-```
 
 Row
 -----------------------------------------------------------------------------
 
 #### Atenção:
 
-- Alguns estados não notificam todos os seus casos suspeitos no e-SUS Notifica.
+- Os números de casos constantes desse painel estão diferentes daqueles apresentados nos painéis anteriores e, em alguns estados, essa diferença é mais pronunciada. Esse fato se dá em razão da utilização de diferentes bases da dados – a base do e-SUS Notifica (utilizada nesse painel) e a base divulgada pelo Ministério da Saúde (utilizada nos anteriores) – e a falta de uniformidade entre elas. A segunda base trás números maiores do que a primeira, indicando que alguns estados não notificam todos os seus casos suspeitos no e-SUS Notifica.
 -	Existe um atraso entre a notificação do resultado do exame e a disponibilização desta informação, o que pode subdimensionar temporariamente os dados das duas últimas semanas epidemiológicas visualizadas.
 O total de testes indica a disponibilidade de testes para a população. Por sua vez, o alto percentual de testes positivos pode indicar baixa disponibilidade de testes ou epidemia fora de controle (Segundo a OMS o percentual de testes RT-PCR positivos deve ser inferior a 5%).
 -	Os testes do tipo RT-PCR são mais confiáveis e detectam a infecção precocemente. Por isso, são os mais utilizados e recomendados internacionalmente para diagnóstico de casos e rastreio populacional.
 -	Os dados disponibilizados aqui se referem aos testes realizados nos pacientes que foram notificados como casos suspeitos para COVID-19. Desta forma, podem não representar o total de testes realizados no Brasil (a COVID-19 é uma doença de notificação obrigatória, entretanto, nem todos os casos suspeitos são notificados).
+
+**Baixar dados filtrados em CSV:**
+
+```{r}
+downloadButton("downloadData", "Baixar CSV")
+
+downloadHandler(filename = function() {
+     paste0('dados-testagem-estado-', tolower(input$uf), '.csv')
+   },
+     content = function(file) {
+       testes_uf() %>%
+       mutate(tipo_teste = factor(tipo_teste, levels = c("RT-PCR", "Teste rápido", "Outros"))) %>%
+       write.csv2(file, row.names = FALSE)
+   }
+)
+```
 

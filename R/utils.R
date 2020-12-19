@@ -1,3 +1,4 @@
+library(data.table)
 library(dplyr)
 library(geobr)
 library(ggplot2)
@@ -25,51 +26,35 @@ load_municipios_info <- function() {
 }
 
 load_testes_municipios <- function(input_file, min_date = "2020-03-01") {
-  read_csv2(input_file) %>%
+  read_csv(input_file) %>%
     filter(ultimo_dia_semana - days(7) >= ymd(min_date),
            ultimo_dia_semana <= today()) %>%
     mutate(tipo_teste = factor(tipo_teste,
                                levels = c("RT-PCR", "Teste rápido", "Outros")))
 }
 
-aggregate_testes_estados <- function(testes_municipios) {
-  testes_municipios %>%
-    group_by(semana_epi) %>%
-    mutate(ultimo_dia_semana = max(ultimo_dia_semana)) %>%
-    filter(wday(ultimo_dia_semana) == 7) %>%
-    group_by(semana_epi, tipo_teste, uf) %>%
-    summarise(
-      ultimo_dia_semana = max(ultimo_dia_semana),
-      testes_positivos = sum(testes_positivos, na.rm = TRUE),
-      testes_negativos = sum(testes_negativos, na.rm = TRUE),
-      testes_inconclusivos = sum(testes_inconclusivos, na.rm = TRUE),
-      testes_total = sum(testes_total, na.rm = TRUE),
-      testes_com_resultado = testes_positivos + testes_negativos + testes_inconclusivos,
-      testes_taxa_positivo = testes_positivos / testes_com_resultado
-    )
-}
-
 load_testes_semana_brasil <- function(testes_municipios) {
   read_csv2() %>%
-  filter(data_inicio_semana >= ymd("2020-03-15"),
-         data_inicio_semana <= today()) %>%
-  left_join(municipios) %>%
-  mutate(tipo_teste = case_when(
-    tipo_teste == "RT-PCR" ~ "RT-PCR",
-    str_starts(tipo_teste, "TESTE RÁPIDO") ~ "Teste rápido",
-    TRUE ~ "Outros"
-   )) %>%
-  group_by(semana_epidemiologica = epiweek(as.Date(data)), tipo_teste) %>%
-  summarise(
-    testes_negativos = sum(testes_negativos),
-    testes_positivos = sum(testes_positivos),
-    testes_inconclusivos = sum(testes_negativos)
-  )
+    filter(data_inicio_semana >= ymd("2020-03-15"),
+           data_inicio_semana <= today()) %>%
+    left_join(municipios) %>%
+    mutate(tipo_teste = case_when(
+      tipo_teste == "RT-PCR" ~ "RT-PCR",
+      str_starts(tipo_teste, "TESTE RÁPIDO") ~ "Teste rápido",
+      TRUE ~ "Outros"
+    )) %>%
+    group_by(semana_epidemiologica = epiweek(as.Date(data)), tipo_teste) %>%
+    summarise(
+      testes_negativos = sum(testes_negativos),
+      testes_positivos = sum(testes_positivos),
+      testes_inconclusivos = sum(testes_negativos)
+    )
 }
 
 aggregate_tests_by_result <- function(esus_paths) {
   map_df(esus_paths, function(esus_file) {
-    read.csv2(esus_file, fileEncoding = "latin1", na.strings = c("", "null")) %>%
+    #read.csv2(esus_file, fileEncoding = "latin1", na.strings = c("", "null")) %>%
+    data.table::fread(esus_file, sep = ";", encoding = "Latin-1", na.strings = c("", "null")) %>%
       #filter(tipoTeste == "RT-PCR") %>%
       mutate(dataNotificacao = as_date(dataNotificacao),
              semana_epi = epiweek(dataNotificacao)) %>%
@@ -86,6 +71,56 @@ aggregate_tests_by_result <- function(esus_paths) {
         testes_inconclusivos = sum(resultadoTeste == "Inconclusivo ou Indeterminado", na.rm = TRUE)
       )
   })
+}
+
+aggregate_tests_by_result_dt <- function(esus_paths) {
+  #map_df(esus_paths, function(esus_file) {
+    #read.csv2(esus_file, fileEncoding = "latin1", na.strings = c("", "null")) %>%
+  rbindlist(lapply(esus_paths, function(esus_file) {
+    print(esus_file)
+    esus_dt <- fread(esus_file, na.strings = c("", "null"), showProgress = FALSE)
+    esus_dt[, dataNotificacao := as.Date(dataNotificacao)]
+    esus_dt <- esus_dt[dataNotificacao >= ymd("2020-03-01") & dataNotificacao <= today() &
+                         ( evolucaoCaso != "Cancelado" | is.na(evolucaoCaso) )]
+    esus_dt[, municipioIBGE := as.character(municipioIBGE)]
+    esus_dt[, semana_epi := epiweek(dataNotificacao)]
+    esus_dt[
+      ,
+      ultimo_dia_semana := max(dataNotificacao),
+      by = semana_epi
+    ]
+    esus_dt <- esus_dt[,
+      .(ultimo_dia_semana = max(ultimo_dia_semana),
+        testes_total = .N,
+        testes_negativos = sum(resultadoTeste == "Negativo", na.rm = TRUE),
+        testes_positivos = sum(resultadoTeste == "Positivo", na.rm = TRUE),
+        testes_inconclusivos = sum(resultadoTeste == "Inconclusivo ou Indeterminado", na.rm = TRUE),
+        casos_confirmados = sum(resultadoTeste == "Positivo" | str_starts(classificacaoFinal, "Confirma"),
+                                na.rm = TRUE)
+      ),
+      by = .(semana_epi, municipioIBGE, tipoTeste)
+    ]
+    setnames(esus_dt, c("municipioIBGE", "tipoTeste"), c("municipio_ibge", "tipo_teste"))
+    esus_dt
+  }))
+}
+
+aggregate_testes_estados <- function(testes_municipios) {
+  testes_municipios %>%
+    group_by(semana_epi) %>%
+    mutate(ultimo_dia_semana = max(ultimo_dia_semana)) %>%
+    filter(wday(ultimo_dia_semana) == 7) %>%
+    group_by(semana_epi, tipo_teste, uf) %>%
+    summarise(
+      ultimo_dia_semana = max(ultimo_dia_semana),
+      testes_positivos = sum(testes_positivos, na.rm = TRUE),
+      testes_negativos = sum(testes_negativos, na.rm = TRUE),
+      testes_inconclusivos = sum(testes_inconclusivos, na.rm = TRUE),
+      testes_total = sum(testes_total, na.rm = TRUE),
+      testes_com_resultado = testes_positivos + testes_negativos + testes_inconclusivos,
+      testes_taxa_positivo = testes_positivos / testes_com_resultado,
+      casos_confirmados = sum(casos_confirmados, na.rm = TRUE),
+    )
 }
 
 aggregate_test_results <- function(testes_municipios, uf = "Todos") {
@@ -129,23 +164,45 @@ aggregate_tests_uf <- function(testes_mun) {
 }
 
 update_testes_municipios <- function() {
-  esus_paths <- list.files("../covid-br-data/esus-notifica/",
-                           "dados-.*csv.gz", full.names = TRUE)
-  
-  esus_tests <- aggregate_tests_by_result(esus_paths)
-  municipios <- load_municipios_info()
+  #esus_paths <- list.files("../covid-br-data/esus-notifica",
+  #                         "dados-.*csv.gz", full.names = TRUE)
+  esus_paths <- list.files("../covid-br-data",
+                           "notificacoes2_.*csv.gz", full.names = TRUE)
+  municipios <- read_csv2("data/municipios_info_ibge.csv", col_types = cols(municipio_ibge = "c"))
+  esus_tests <- aggregate_tests_by_result_dt(esus_paths)
   
   esus_tests <- municipios %>%
     right_join(esus_tests) %>%
     filter(!is.na(tipo_teste)) %>%
     mutate(tipo_teste = factor(case_when(
       tipo_teste == "RT-PCR" ~ "RT-PCR",
-      str_starts(tipo_teste, "TESTE RÁPIDO") ~ "Teste rápido",
-      TRUE ~ "Outros"
+      #str_starts(tipo_teste, "TESTE RÁPIDO") ~ "Teste rápido",
+      TRUE ~ "Teste rápido"
     )))
   
   write.csv2(esus_tests, file.path("data", "esus_testes_municipios.csv"),
              row.names = FALSE)
+}
+
+update_testes_municipios_dt <- function() {
+  # esus_paths <- list.files("../covid-br-data",
+  #                          "notificacoes2_.*csv.gz", full.names = TRUE)
+  esus_paths <- list.files("../covid-br-data/esus-notifica/api",
+                          "notificacoes_.*csv.gz", full.names = TRUE)
+  esus_tests <- aggregate_tests_by_result_dt(esus_paths)
+  #esus_tests[!is.na(tipo_teste)]
+  municipios <- fread("data/municipios_info_ibge.csv", colClasses = "character")
+  esus_tests <- esus_tests[municipios, on = "municipio_ibge"]
+  esus_tests[
+    ,
+    tipo_teste := factor(case_when(
+      tipo_teste == "RT-PCR" ~ "RT-PCR",
+      #str_starts(tipo_teste, "TESTE RÁPIDO") ~ "Teste rápido",
+      is.na(tipo_teste) ~ NA_character_,
+      TRUE ~ "Teste rápido"
+    ))
+  ]
+  fwrite(esus_tests, file.path("data", "esus_testes_municipios.csv"))
 }
 
 update_testes_estados <- function() {
@@ -186,8 +243,6 @@ update_evolucao_uf <- function() {
 update_br_states_shapes <- function() {
   states_shapes <- read_state(year=2018, showProgress = FALSE)
   st_write(states_shapes, "data/states_shapes.gpkg")
-  #write_json(states_shapes, "data/br_states_shapes.json")
-  #write_csv2(states_shapes, "data/br_states_shapes.csv")
 }
 
 update_covid_municipios <- function() {
@@ -212,4 +267,9 @@ update_covid_municipios <- function() {
     ) %>%
     rename(regiao = region, uf = state, semana_epi = epi_week)
   write_csv2(covid_mun, "data/covid_evolucao_municipios.csv")
+}
+
+update_municipios_info <- function() {
+  mun_info <- load_municipios_info()
+  write_csv2(mun_info, "data/municipios_info_ibge.csv")
 }
