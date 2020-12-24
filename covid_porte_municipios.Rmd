@@ -51,7 +51,8 @@ plot_porte_lines <- function(df, metrica, min_date = "2020-01-03", ...) {
 portes <- c("Menor que 10 mil", "10 a 20 mil", "20 a 100 mil", "Acima de 100 mil")
 
 covid_porte <- read_csv2("data/covid_evolucao_porte_municipios.csv") %>%
-  mutate(porte = factor(porte, levels = portes))
+  mutate(porte = factor(porte, levels = portes),
+         data = ultima_dia_semana)
 ```
 
 Row
