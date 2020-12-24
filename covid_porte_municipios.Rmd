@@ -43,7 +43,7 @@ plot_porte_lines <- function(df, metrica, min_date = "2020-01-03", ...) {
     scale_x_date(date_breaks = "2 months",
                  date_labels = "%b") +
     facet_wrap(~ regiao, nrow = 2) +
-    labs(x = "Data", y = "", col = "", ...) +
+    labs(x = "Data", y = "", col = "Porte", ...) +
     theme_bw() +
     theme(legend.position = "bottom")
 }
