@@ -61,7 +61,7 @@ Row
 ### Incidência por porte dos municípios (média móvel para 7 dias)
 
 ```{r, fig.height=8}
-plot_porte_lines(covid_porte, incidencia_media7) %>%
+plot_porte_lines(covid_porte, incidencia) %>%
   ggplotly() %>%
   layout(legend = list(x = 0.75, y = 0.2))
 ```
@@ -72,7 +72,7 @@ Row
 ### Mortalidade por porte dos municípios (média móvel para 7 dias)
 
 ```{r, fig.height=8}
-plot_porte_lines(covid_porte, mortalidade_media7) %>%
+plot_porte_lines(covid_porte, mortalidade) %>%
   ggplotly() %>%
   layout(legend = list(x = 0.75, y = 0.2))
 ```
