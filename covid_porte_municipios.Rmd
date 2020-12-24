@@ -40,8 +40,9 @@ plot_porte_lines <- function(df, metrica, min_date = "2020-01-03", ...) {
     filter(data >= ymd(min_date)) %>%
     ggplot(aes(data, {{ metrica }}, col = porte)) +
     geom_line() +
-    scale_x_date(date_breaks = "1 month",
-                 date_labels = "%d %b") +
+    scale_x_date(date_breaks = "2 months",
+                 date_labels = "%b") +
+    facet_wrap(~ regiao, nrow = 2) +
     labs(x = "Data", y = "", col = "", ...) +
     theme_bw() +
     theme(legend.position = "bottom")
@@ -58,9 +59,10 @@ Row
 
 ### Incidência por porte dos municípios (média móvel para 7 dias)
 
-```{r}
+```{r, fig.height=8}
 plot_porte_lines(covid_porte, incidencia_media7) %>%
-  ggplotly()
+  ggplotly() %>%
+  layout(legend = list(x = 0.75, y = 0.2))
 ```
 
 Row
@@ -68,7 +70,8 @@ Row
 
 ### Mortalidade por porte dos municípios (média móvel para 7 dias)
 
-```{r}
+```{r, fig.height=8}
 plot_porte_lines(covid_porte, mortalidade_media7) %>%
-  ggplotly()
+  ggplotly() %>%
+  layout(legend = list(x = 0.75, y = 0.2))
 ```
